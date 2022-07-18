@@ -5,7 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"html/template"
+	"io/ioutil"
 	"log"
+	"math/rand"
 	"net/http"
 	"strconv"
 	"strings"
@@ -23,6 +26,18 @@ const USERNAME = "bambang111"
 const PASSWORD = "bambangs"
 const secretkey = "jwtsecretkey111"
 
+type Status struct {
+	Water int `json:"water"`
+	Wind  int `json:"wind"`
+}
+
+type Weather struct {
+	Status  Status `json:"status"`
+	Remarks string `json:"remarks"`
+}
+
+var data Weather
+
 func dbConn() *sql.DB {
 	db, err := sql.Open("mysql", "root:admin123@tcp(127.0.0.1:3306)/hello?parseTime=true")
 	if err != nil {
@@ -37,13 +52,17 @@ func main() {
 	db = dbConn()
 	defer db.Close()
 	r := mux.NewRouter()
-	r.HandleFunc("/", greet)
-	r.HandleFunc("/users", MiddlewareAuth(UserHandler))
-	r.HandleFunc("/users/{Id}", MiddlewareAuth(UserHandler))
-	r.HandleFunc("/users/{Id}", MiddlewareAuth(UserHandler))
-	r.HandleFunc("/users-url", MiddlewareAuth(GetUserFromAPI))
+	userRoutes := r.PathPrefix("/users").Subrouter()
+	userRoutes.HandleFunc("", UserHandler)
+	userRoutes.HandleFunc("/{Id}", UserHandler)
+	userRoutes.HandleFunc("/{Id}", UserHandler)
+	userRoutes.HandleFunc("/users-url", GetUserFromAPI)
+	userRoutes.Use(MiddlewareAuth)
+
 	r.HandleFunc("/register", RegisterHandler)
 	r.HandleFunc("/login", Login).Methods("POST")
+	go RNG()
+	r.HandleFunc("/assignment3", TriggerWeather)
 	http.Handle("/", r)
 	http.ListenAndServe(PORT, nil)
 }
@@ -52,6 +71,25 @@ func main() {
 func greet(w http.ResponseWriter, r *http.Request) {
 	msg := "Hello world"
 	fmt.Fprint(w, msg)
+}
+
+const htmlPath = "static/web.html"
+const jsonPath = "static/weather.json"
+
+func TriggerWeather(w http.ResponseWriter, r *http.Request) {
+	w.Header().Add("Content-Type", "text/html")
+	file, _ := ioutil.ReadFile(jsonPath)
+	json.Unmarshal(file, &data)
+	template, _ := template.ParseFiles(htmlPath)
+	tempData := Weather{
+		Status: Status{
+			Water: data.Status.Water,
+			Wind:  data.Status.Wind,
+		},
+		Remarks: data.Remarks,
+	}
+	template.Execute(w, tempData)
+
 }
 
 func Login(w http.ResponseWriter, r *http.Request) {
@@ -96,7 +134,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	token.Username = user.Username
 	token.TokenString = validToken
 	json.NewEncoder(w).Encode(token)
-	ResponseWriter(w, 200, "Login succeed")
+	return
 }
 func CheckPasswordHash(password, hash string) bool {
 	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
@@ -270,9 +308,10 @@ func GetUserFromAPI(w http.ResponseWriter, r *http.Request) {
 }
 
 //Middleware
-func MiddlewareAuth(next http.HandlerFunc) http.HandlerFunc {
+func MiddlewareAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tokenString, ok := extractTokenFromAuthHeader(r.Header.Get("Authorization"))
+
 		if !ok {
 			var err entity.Error
 			err = SetError(err, "No Token Found")
@@ -307,6 +346,7 @@ func MiddlewareAuth(next http.HandlerFunc) http.HandlerFunc {
 		next.ServeHTTP(w, r)
 
 	})
+
 }
 
 //Helper functions
@@ -322,13 +362,13 @@ func GeneratehashPassword(password string) (string, error) {
 	bytes, err := bcrypt.GenerateFromPassword([]byte(password), 14)
 	return string(bytes), err
 }
-func GenerateJWT(email string) (string, error) {
+func GenerateJWT(username string) (string, error) {
 	var mySigningKey = []byte(secretkey)
 	token := jwt.New(jwt.SigningMethodHS256)
 	claims := token.Claims.(jwt.MapClaims)
 
 	claims["authorized"] = true
-	claims["email"] = email
+	claims["username"] = username
 	claims["exp"] = time.Now().Add(time.Minute * 30).Unix()
 
 	tokenString, err := token.SignedString(mySigningKey)
@@ -351,4 +391,26 @@ func ResponseWriter(w http.ResponseWriter, status int, message string) {
 	response.Message = message
 	responseJson, _ := json.Marshal(response)
 	w.Write(responseJson)
+}
+
+func RNG() {
+	for {
+
+		data.Status.Water = rand.Intn(100-1) + 1
+		data.Status.Wind = rand.Intn(100-1) + 1
+		if (data.Status.Water >= 6 && data.Status.Water <= 8) || (data.Status.Water >= 7 && data.Status.Wind <= 15) {
+			data.Remarks = "siaga"
+		} else if data.Status.Water > 8 || data.Status.Wind > 15 {
+			data.Remarks = "bahaya"
+		}
+		GenerateWeatherStatusFile(data)
+		time.Sleep(15 * time.Second)
+	}
+}
+
+func GenerateWeatherStatusFile(data Weather) {
+
+	file, _ := json.MarshalIndent(data, "", "    ")
+
+	_ = ioutil.WriteFile("static/weather.json", file, 0644)
 }
