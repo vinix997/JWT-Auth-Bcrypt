@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 	"ws/entity"
+	"ws/service"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/golang-jwt/jwt"
@@ -73,14 +74,14 @@ func greet(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, msg)
 }
 
-const htmlPath = "static/web.html"
-const jsonPath = "static/weather.json"
+const HtmlPath = "static/web.html"
+const JsonPath = "static/weather.json"
 
 func TriggerWeather(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Content-Type", "text/html")
-	file, _ := ioutil.ReadFile(jsonPath)
+	file, _ := ioutil.ReadFile(JsonPath)
 	json.Unmarshal(file, &data)
-	template, _ := template.ParseFiles(htmlPath)
+	template, _ := template.ParseFiles(HtmlPath)
 	tempData := Weather{
 		Status: Status{
 			Water: data.Status.Water,
@@ -95,6 +96,8 @@ func TriggerWeather(w http.ResponseWriter, r *http.Request) {
 func Login(w http.ResponseWriter, r *http.Request) {
 	var authDetails entity.Authentication
 	err := json.NewDecoder(r.Body).Decode(&authDetails)
+
+	service.NewUserService().Register()
 
 	if err != nil {
 		var err entity.Error
@@ -393,7 +396,7 @@ func ResponseWriter(w http.ResponseWriter, status int, message string) {
 	w.Write(responseJson)
 }
 
-func RNG() {
+func RNG() error {
 	for {
 
 		data.Status.Water = rand.Intn(100-1) + 1
@@ -405,6 +408,7 @@ func RNG() {
 		}
 		GenerateWeatherStatusFile(data)
 		time.Sleep(15 * time.Second)
+		return nil
 	}
 }
 
@@ -413,4 +417,8 @@ func GenerateWeatherStatusFile(data Weather) {
 	file, _ := json.MarshalIndent(data, "", "    ")
 
 	_ = ioutil.WriteFile("static/weather.json", file, 0644)
+}
+
+func Sum(a1, a2 int) int {
+	return a1 + a2
 }
